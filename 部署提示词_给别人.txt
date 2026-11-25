@@ -1,0 +1,494 @@
+﻿══════════════════════════════════════════════════════════════
+  背屏 AI 桌宠 · 通用部署提示词
+══════════════════════════════════════════════════════════════
+
+用法：把本文件全部内容复制给任意 AI 助手（Claude / GPT / DeepSeek /
+通义千问等），它会带着你一步步把整套东西装起来。
+
+文中带 [方括号] 的地方是占位符，按你的实际情况替换。
+
+关键信息速查：
+  · 项目地址  https://github.com/nzz0991999-ai/xiaomi-rear-ai-pet
+  · 需要环境  Windows 10/11 + 真 Python 3.10+ + 带妙享背屏的小米手机
+  · 手机软件  Shizuku + 背屏 AI 桌宠 APK（服务端自带下载）
+  · 常见坑    见「七、已知的六个坑」，报错先去那里找
+
+==============================================================
+  任务
+==============================================================
+
+帮我在 Windows 电脑 + 带妙享背屏的小米手机 上完整部署开源项目「xiaomi-rear-ai-pet」（背屏 AI 桌宠），让我能实时看到电脑上 AI 编程助手（DSH / Claude Code / Codex / Cursor 等）的运行状态，显示在手机背屏上。
+
+请按步骤执行，每步做完告诉我验证方法。遇到报错先看文末「已知的六个坑」，大概率在那里。
+
+
+==============================================================
+  一、这是什么
+==============================================================
+
+  · GitHub：https://github.com/nzz0991999-ai/xiaomi-rear-ai-pet
+  · 原理：电脑跑一个纯 Python 标准库的 HTTP 服务（默认 8765 端口），Ai 助手通过插件/hook 把状态 POST 过来；手机上的 App 是个 WebView，定时拉取状态，用 Shizuku 把窗口投到背屏。
+  · 不需要 root，只要 Shizuku。
+  · 支持的状态：idle / running / waiting_user / completed_unread / failed，对应背屏上五个颜色的赛博眼睛。
+  · 不会抢你的亮度、不会改系统设置，就是个网页显示器。
+
+
+==============================================================
+  二、前置条件
+==============================================================
+
+  · 电脑：Windows 10/11，能联网（下载用）
+  · Python：3.10+。注意：python --version 有输出不代表能用（Windows 应用商店的 stub 会返回版本号但执行报错）。验证方法：python -c "print(1)"，报错就是假 python，请装真 Python 或用全路径
+  · 手机：小米带「妙享背屏」的机型（17 Pro / 17 Pro Max / 15S Pro 等）
+  · 手机软件：Shizuku（App 内可下载，或去 shizuku.rikka.app）；「背屏 AI 桌宠」APK（服务端自带下载）
+  · 网络：手机和电脑同一局域网最省事；不同网络需要隧道（见第五节）
+
+
+==============================================================
+  三、电脑端部署
+==============================================================
+
+
+--------------------------------------------------------------
+  3.1 下载解压
+--------------------------------------------------------------
+
+没有 git 就直接下 zip：
+
+
+    ----------------------------------------------
+    $url = 'https://codeload.github.com/nzz0991999-ai/xiaomi-rear-ai-pet/zip/refs/heads/main'
+    Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\rear-pet.zip"
+    Expand-Archive "$env:TEMP\rear-pet.zip" -DestinationPath 'D:\' -Force
+    # 解压出来是 D:\xiaomi-rear-ai-pet-main，改成不带 -main 的也行
+    ----------------------------------------------
+
+
+--------------------------------------------------------------
+  3.2 先查端口有没有被占
+--------------------------------------------------------------
+
+这一步别跳。 8765 是很常见的自用端口，被占了服务会起不来或起错东西。
+
+
+    ----------------------------------------------
+    netstat -ano | findstr /C:":8765" | findstr /I "LISTENING"
+    ----------------------------------------------
+
+
+有输出说明被占了。不要杀那个进程（可能是你自己别的东西），换个端口，比如 8775。本文后面统一用 [PORT] 表示，你把它换成实际值。
+
+
+--------------------------------------------------------------
+  3.3 启动服务
+--------------------------------------------------------------
+
+
+    ----------------------------------------------
+    cd [项目目录]
+    [python全路径] server.py --host 0.0.0.0 --port [PORT]
+    ----------------------------------------------
+
+
+注意 --host 0.0.0.0，不写就只监听本机，手机连不上。
+
+想后台无窗运行，用 pythonw.exe：
+
+
+    ----------------------------------------------
+    Start-Process -FilePath "[pythonw全路径]" -ArgumentList '-X','utf8','[项目目录]\server.py','--host','0.0.0.0','--port','[PORT]' -WindowStyle Hidden -WorkingDirectory '[项目目录]'
+    ----------------------------------------------
+
+
+验证：
+
+
+    ----------------------------------------------
+    curl.exe -s http://127.0.0.1:[PORT]/api/info
+    ----------------------------------------------
+
+
+应该返回一段 JSON，含 "port"、"lan_ips"、"apk_available":true。
+
+
+--------------------------------------------------------------
+  3.4 查电脑的局域网 IP
+--------------------------------------------------------------
+
+
+    ----------------------------------------------
+    Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254*' -and $_.IPAddress -ne '127.0.0.1' } | Select-Object InterfaceAlias,IPAddress
+    ----------------------------------------------
+
+
+注意：如果装了 VMware / VirtualBox，会有 192.168.x.1 这种虚拟网卡，那个不是给手机用的。找和你 WiFi 同网段的那个（连着 WiFi 一般是 192.168.x.x 或 10.x.x.x），且它的 InterfaceAlias 是 WLAN / Wi-Fi。
+
+自测：curl.exe -s http://[局域网IP]:[PORT]/api/info
+
+
+--------------------------------------------------------------
+  3.5 防火墙
+--------------------------------------------------------------
+
+Windows 默认会拦入站。加一条规则（在管理员 PowerShell 里）：
+
+
+    ----------------------------------------------
+    New-NetFirewallRule -DisplayName "RearPet" -Direction Inbound -Protocol TCP -LocalPort [PORT] -Action Allow -Profile Any
+    New-NetFirewallRule -DisplayName "RearPet-UDP" -Direction Inbound -Protocol UDP -LocalPort 8766 -Action Allow -Profile Any
+    ----------------------------------------------
+
+
+（8766 是 UDP 自动发现用的，不加也能用，只是要手填 IP。）
+
+
+==============================================================
+  四、手机端
+==============================================================
+
+
+--------------------------------------------------------------
+  4.1 装 App
+--------------------------------------------------------------
+
+浏览器打开 http://[局域网IP]:[PORT]/，页面上有下载按钮；或者直接 http://[局域网IP]:[PORT]/download/MiRearPet.apk。
+
+装完打开，界面有四块：
+
+  · 顶部标题「背屏 AI 桌宠」
+  · 卡片 1「连接电脑」：一个地址输入框 + 「重新搜索局域网电脑」按钮
+  · 卡片 2「小米妙享背屏投射」：Shizuku 状态 + 「一键投到妙享背屏」
+  · 卡片 3「普通手机/平板全屏模式」
+
+
+--------------------------------------------------------------
+  4.2 装 Shizuku 并授权
+--------------------------------------------------------------
+
+  1. 装 Shizuku（App 内能下，或 shizuku.rikka.app）
+  2. 打开 Shizuku，按它引导启动服务（用无线调试配对是最简单的免 root 方式，Android 11+ 支持）
+  3. 回到「背屏 AI 桌宠」，卡片 2 应该变成 ● Shizuku: 已授权就绪（绿色）
+
+
+--------------------------------------------------------------
+  4.3 填地址（关键）
+--------------------------------------------------------------
+
+自动搜索经常失败，别指望它。直接在卡片 1 的输入框里手填：
+
+
+    ----------------------------------------------
+    http://[局域网IP]:[PORT]/
+    ----------------------------------------------
+
+
+末尾的 / 要留着。 然后不用点保存——currentUrl() 每次启动都直接读输入框。
+
+
+--------------------------------------------------------------
+  4.4 投到背屏
+--------------------------------------------------------------
+
+点「一键投到妙享背屏」，然后翻到手机背面。应该能看到两只发光眼睛。
+
+idle（空闲）时是银蓝色半眯眼，超过 20 秒会变成更小的样子 —— 这是正常的，不是坏了。
+
+
+--------------------------------------------------------------
+  4.5 开守护模式（建议）
+--------------------------------------------------------------
+
+卡片 2 里的「息屏 / 切走后自动拉回背屏」开关，打开。这样你切到别的 App、或者屏幕灭了再亮，它会 4 秒内自动把桌宠拉回背屏。
+
+
+==============================================================
+  五、不在同一局域网怎么办
+==============================================================
+
+如果手机和电脑不在同一个 WiFi（比如电脑在宿舍、你在实验室），需要穿越。
+
+
+--------------------------------------------------------------
+  方案 A：Cloudflare 临时隧道（免费，但域名会变）
+--------------------------------------------------------------
+
+
+    ----------------------------------------------
+    # 下载 cloudflared（GitHub 直链在国内很慢，用镜像）
+    $mirror = 'https://ghfast.top/https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+    curl.exe -L --max-time 600 -o "[项目目录]\cloudflared.exe" $mirror
+
+    # 起隧道
+    cd [项目目录]
+    .\cloudflared.exe tunnel --url http://127.0.0.1:[PORT] --no-autoupdate --protocol http2 --logfile tunnel.log
+    ----------------------------------------------
+
+
+启动后日志里会出现一个 https://xxx-yyy-zzz.trycloudflare.com 的地址。把这个地址填到手机 App 的输入框里（替换掉局域网 IP 那个）。
+
+重要：这个域名跟进程绑定。进程重启就换新域名，手机端要重新改地址。建议写个脚本监控 tunnel.log，域名变了自动通知你（发微信/QQ/邮件都行）。
+
+
+--------------------------------------------------------------
+  方案 B：Windows 移动热点（局域网，最稳）
+--------------------------------------------------------------
+
+如果电脑和手机能靠得近，直接开热点，不依赖外网，电脑断网也能用：
+
+
+    ----------------------------------------------
+    # 需要 WinRT，PowerShell 里跑
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+      $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+    })[0]
+
+    function Await($op, $type) {
+      $task = $asTaskGeneric.MakeGenericMethod($type).Invoke($null, @($op))
+      $task.Wait(-1) | Out-Null
+      $task.Result
+    }
+
+    [Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime] | Out-Null
+    [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager,Windows.Networking.NetworkOperators,ContentType=WindowsRuntime] | Out-Null
+
+    $conn = [Windows.Networking.Connectivity.NetworkInformation]::GetInternetConnectionProfile()
+    $mgr = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($conn)
+    Await ($mgr.StartTetheringAsync()) ([Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult])
+    ----------------------------------------------
+
+
+热点开起来后默认是 192.168.137.1，手机连这个 WiFi，地址填 http://192.168.137.1:[PORT]/。
+
+注意：netsh wlan show drivers 里 Hosted network supported: No 不代表不能开，WinRT 移动热点是另一套机制，别被这条误导。
+
+
+--------------------------------------------------------------
+  方案 C：固定域名（一劳永逸，但要个域名）
+--------------------------------------------------------------
+
+  1. 买个便宜域名（.xyz 首年常 1 元，.top 也是）
+  2. 在 Cloudflare 加站点（Free 套餐），拿到两个 NS
+  3. 去域名注册商把 NS 改成 Cloudflare 的
+  4. 等 Cloudflare 显示 Active（几分钟到 48 小时）
+  5. 电脑上：
+
+    ----------------------------------------------
+       .\cloudflared.exe tunnel login          # 浏览器授权
+       .\cloudflared.exe tunnel create rear-pet
+       .\cloudflared.exe tunnel route dns rear-pet pet.[你的域名]
+    ----------------------------------------------
+
+  6. 写 config.yml：
+
+    ----------------------------------------------
+       tunnel: [tunnel的UUID]
+       credentials-file: C:\Users\[你]\.cloudflared\[UUID].json
+       ingress:
+         - service: http://127.0.0.1:[PORT]
+         - service: http_status:404
+    ----------------------------------------------
+
+  7. 起：.\cloudflared.exe tunnel --config config.yml run
+
+之后地址固定成 https://pet.[你的域名]/，隧道重启也不用改手机。
+
+注意：Cloudflare 代理后的 IP 在国内时通时不通。这条能保证「地址不变」，不保证「一定能连」。
+
+
+==============================================================
+  六、让 AI 助手把状态报过来
+==============================================================
+
+项目带了几个适配器在 adapters/ 目录下。以 DeepSeek Harness (DSH) 为例：
+
+
+    ----------------------------------------------
+    cd [项目目录]
+    [python全路径] -c "import hook_manager; hook_manager.install_agent('dsh')"
+    ----------------------------------------------
+
+
+它会往 DSH 的 profile 里写一个 Cordis 插件（@local/mi-rear-pet-status）。
+
+两个注意点：
+
+  1. 端口要改。插件源码里 const PORT = Number(process.env.MI_REAR_PET_PORT || 8765);，如果你用的是别的端口，把 8765 改成你的，并且要改两处：源目录 adapters/dsh-plugin/index.js 和安装后的副本（Windows 上没符号链接权限时会 copytree，实际生效的是 C:\Users\[你]\.dsh\profiles\desktop\node_modules\@local\mi-rear-pet-status\index.js）。
+  2. 必须重启 AI 软件。Cordis 只在启动时加载 bundle，不重启不生效。
+
+Claude Code / Codex / Cursor 等用 hook_manager.py 里对应的函数，或者看 adapters/ 下其他目录。
+
+
+==============================================================
+  七、已知的六个坑（重点）
+==============================================================
+
+
+--------------------------------------------------------------
+  坑 1：端口被占
+--------------------------------------------------------------
+
+8765 是常见自用端口。起服务前先 netstat -ano | findstr :8765。被占就换端口，不要杀别人的进程。
+
+
+--------------------------------------------------------------
+  坑 2：公网隧道会缓冲 SSE，画面永不更新
+--------------------------------------------------------------
+
+server.py 用 SSE（/api/events）推状态。cloudflared 的 quick tunnel 会把这个长连接缓冲住，导致手机只在第一帧拿到状态，之后一模一样不动。
+
+验证方法（决定性问题）：
+
+
+    ----------------------------------------------
+    # 本机：应该秒出数据
+    curl.exe -N --max-time 6 http://127.0.0.1:[PORT]/api/events
+
+    # 公网：如果 10 秒零字节，就是被缓冲了
+    curl.exe -N --max-time 10 https://[你的隧道域名]/api/events
+    ----------------------------------------------
+
+
+修法：改 web/index.html，在 SSE 那段加轮询兜底：
+
+
+    ----------------------------------------------
+    let lastSseAt = Date.now();
+
+    async function pollStatusFallback() {
+      try {
+        const r = await fetch("/api/status", { cache: "no-store" });
+        if (!r.ok) return;
+        const payload = await r.json();
+        liveData = payload;
+        processLiveCompletions(payload);
+        renderBadges();
+        updateBanner();
+        if (isPreview) updatePhoneConnIndicator(payload.connected_phones || 0);
+      } catch (_) {}
+    }
+
+    // 在 eventSource.onmessage 第一行加：lastSseAt = Date.now();
+    setInterval(() => {
+      if (Date.now() - lastSseAt > 6000) pollStatusFallback();
+    }, 1500);
+    ----------------------------------------------
+
+
+server.py 每个请求都现读文件，改 HTML 不用重启服务。
+
+
+--------------------------------------------------------------
+  坑 3：Windows 上 .bat 必须存成 GBK
+--------------------------------------------------------------
+
+这台机器的 cmd 按 936(GBK) 读批处理。如果你用 UTF-8 写 .bat，中文路径会全废、变量变成乱码。
+
+修法（PowerShell 里写 bat）：
+
+
+    ----------------------------------------------
+    [System.IO.File]::WriteAllText('xxx.bat', $body, [System.Text.Encoding]::GetEncoding(936))
+    ----------------------------------------------
+
+
+并且换行必须是 CRLF。
+
+
+--------------------------------------------------------------
+  坑 4：schtasks 改不动已有任务
+--------------------------------------------------------------
+
+非管理员执行 schtasks /Create /F 对已存在的任务会报 ERROR: Access is denied.。
+
+替代方案：放进启动文件夹
+
+
+    ----------------------------------------------
+    %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\
+    ----------------------------------------------
+
+
+放一个 bat 快捷方式进去，开机自动跑。这个不需要管理员。
+
+
+--------------------------------------------------------------
+  坑 5：curl -o NUL -w "%{http_code}" 在 Windows 返回 000
+--------------------------------------------------------------
+
+不代表网络不通。 NUL 这个设备在 curl 里写不进去，返回码被吞了。
+
+测连通性正确姿势：
+
+
+    ----------------------------------------------
+    curl.exe -s https://[地址]/api/status
+    # 直接看输出，有内容就是通的
+    ----------------------------------------------
+
+
+或者用 Invoke-WebRequest。别拿 -o NUL 的结果下结论。
+
+
+--------------------------------------------------------------
+  坑 6：清后台后不会自己回来
+--------------------------------------------------------------
+
+「清除后台」在 Android 上是 Force Stop：杀进程 + 取消定时器 + 禁止自启动。任何 App 都扛不过，这是设计。
+
+能做的：
+
+  1. App 设置里打开「守护模式」（4 秒检查一次，被切走就拉回）
+  2. 系统设置：设置 → 应用设置 → 应用管理 → 背屏AI桌宠
+     · 省电策略 → 无限制（默认「智能省电」会偷偷杀）
+     · 自启动 → 打开
+  3. 最近任务里把卡片下拉锁定
+
+进阶（要改 APK）：加一个空的无障碍服务，让系统把进程当系统组件对待，清后台后系统会自动 rebind，3~10 秒自己回来。参考 android/src/com/mirearpet/ 里的结构，需要 apktool 反编译改 smali：
+
+
+    ----------------------------------------------
+    .class public Lcom/mirearpet/KeepAliveService;
+    .super Landroid/accessibilityservice/AccessibilityService;
+    ----------------------------------------------
+
+
+onServiceConnected() 里要主动 startForegroundService(RearGuardService)，并传入从 SharedPreferences 读到的 URL，否则背屏会闪一下空界面然后加载失败。
+
+
+==============================================================
+  八、验证清单
+==============================================================
+
+装完按这个顺序验，哪一步断了就停在那一步查：
+
+  1. curl.exe -s http://127.0.0.1:[PORT]/api/info → 返回 JSON
+  2. curl.exe -s http://[局域网IP]:[PORT]/api/info → 返回 JSON（防火墙没问题）
+  3. 手机浏览器打开 http://[局域网IP]:[PORT]/ → 能看到控制台页面
+  4. 手机 App 填地址、投屏 → 背屏出现银蓝色眼睛
+  5. curl.exe -s -X POST -H "Content-Type: application/json" -d "{\"provider\":\"dsh\",\"state\":\"running\"}" http://127.0.0.1:[PORT]/api/test → 背屏变电光青
+  6. curl.exe -s http://127.0.0.1:[PORT]/api/status → "connected_phones": 1
+  7. 在 AI 助手里发一句话 → 背屏自动变青（说明插件生效）
+
+
+==============================================================
+  九、几个容易误判的现象
+==============================================================
+
+「只有两条横线，没有眼睛」 —— 这是 idle 且正在眨眼。眨眼时眼睛会被压成 6px 高的横线。等几秒或者推一下状态就好。
+
+「背屏一片黑，什么都没有」 —— 两种情况：① 手机背屏熄屏了（守护模式故意不拉回熄屏状态的背屏，省电），按一下电源键；② 你在别的地方动了这个 App 的 HTML，把深睡逻辑写成了默认行为。检查 web/index.html 里有没有一段在 idle 超过 N 秒后 ctx.fillRect(0,0,cw,ch) 刷黑的代码。
+
+「手机连上了但眼睛不变」 —— 八成是坑 2（SSE 被隧道缓冲）。用 /api/status 看 providers 里的值有没有在变：如果服务端的值在变、手机不变，就是传输层的问题，不是服务端的问题。
+
+「状态一直是 running 不回落」 —— 如果你用 /api/test 手工推过状态，注意它是没有 TTL 的，会一直挂着 600 秒，盖住真实事件。复位方法：推一条 {"provider":"xxx","state":"idle"}，会触发 hub.clear_test_sessions()。
+
+
+==============================================================
+  十、红线
+==============================================================
+
+  · 别动你不知道来源的 8765 端口进程
+  · server.py 的 /api/agents/install 和 /api/agents/remove 会改写本机 AI 软件的配置文件，别让局域网里其他人碰
+  · 不要用 Edge/Chrome 的 headless 模式给这个页面截图 —— 页面有 SSE 长连接，headless 会卡住不返回
+  · 隧道地址是公开的，任何拿到的人都能看你的状态、能改你的 AI 配置。别发群里

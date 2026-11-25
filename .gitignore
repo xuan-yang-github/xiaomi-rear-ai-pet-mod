@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# 大文件 / 二进制（不进 git，走 Release）
+cloudflared.exe
+cloudflared
+android/dist/
+*.apk
+*.idsig
+
+# 运行时产物
+*.log
+pet.out.log
+pet.err.log
+tunnel*.log
+tunnel*.out
+tunnel*.err
+keepalive.log
+domain_watch.log
+domain_watch_state.txt
+notify_tunnel.log
+last_tunnel_url.txt
+cloudflare_ns.txt
+config.yml
+.qr_cache/
+
+# 本地状态 / 备份
+__syntaxcheck/
+web/_syntaxcheck/
+*.bak
+*.bak-*
+*.utf8bad-*
+.venv/
+venv/
+
+# 证书 / 凭据
+cert.pem
+*.json.credentials
+.env
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini
